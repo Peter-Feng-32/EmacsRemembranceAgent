@@ -20,7 +20,7 @@
     :group 'remembrance-agent
 )
 ;; Todo: refresh remembrance agent buffer here when set.
-(defcustom num-suggestions-text 1
+(defcustom num-suggestions-text 2
     "Number of suggestions for the remembrance agent to show based on buffer text"
     :type '(integer)
     :options '(1 2 3)
@@ -48,17 +48,12 @@
 
 ;; Remembrance agent scope configs (type,  name, period)
 ;; period - number of seconds in between queries
-(defvar remem-scopes-configs-list-voice
-    (list remem-voice-type "voice 1" 1) 
-    "Scopes for remembrance agent to query by voice"
-)
 
-(defvar remem-scopes-configs-list-text
+(defvar remem-scopes-configs-list (list 
     (list remem-text-type "text 1" 2)
-    "Scopes for remembrance agent to query by text"
-)
-
-(defvar remem-scopes-configs-list (list remem-scopes-configs-list-voice remem-scopes-configs-list-text))
+    (list remem-text-type "text 2" 3)
+    (list remem-voice-type "voice 1" 1) 
+))
 
 (defvar remem-scopes nil)
 ;; (make-variable-buffer-local 'remem-scopes) ; each buffer has its own set of scopes
@@ -87,12 +82,19 @@
                             )
                             (set-text-properties 0 (length result) nil result)
 
-                            (message remem-buffer-name)
                             (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+
                                 (read-only-mode 0)
-                                (goto-line index)                   
-                                (delete-region (line-beginning-position) (line-end-position))  ;; Clear the line
+                                (goto-char (point-min))
+                                (forward-line index)         
+                                (let ((end (line-end-position)))
+                                    (if (and (not (eobp)) (char-equal (char-after end) ?\n))
+                                        (delete-region (line-beginning-position) (1+ end))  ;; Include newline
+                                    (delete-region (line-beginning-position) end))) 
                                 (insert result)  ;; Insert the string
+                                (insert " | ")
+                                (insert name)
+                                (insert "\n")
                                 (read-only-mode 1)
                             )
                         )
