@@ -55,6 +55,9 @@
     (list remem-voice-type "voice 1" 1) 
 ))
 
+(setq current-voice-input "Test Voice")
+(setq voice-input-wordcount 5)
+
 (defvar remem-scopes nil)
 ;; (make-variable-buffer-local 'remem-scopes) ; each buffer has its own set of scopes
 
@@ -72,35 +75,27 @@
                     nil ;query
         ))
         )
+
         (if (> period 0)
-            (if (string= scope-type remem-text-type)
-                (remem-set-scope-timer new-scope
-                (run-at-time 1 period 
-                    (lambda ()
-                        (let (
-                            (result (format-result(remem-query (remem-last-several-words 5))))
+            (cond
+                ((string= scope-type remem-text-type)
+                    (remem-set-scope-timer new-scope
+                    (run-at-time 1 period 
+                        (lambda ()
+                            (remem-query index name (remem-last-several-words 5))
                             )
-                            (set-text-properties 0 (length result) nil result)
-
-                            (with-current-buffer remem-buffer-name   ;; Switch to the buffer
-
-                                (read-only-mode 0)
-                                (goto-char (point-min))
-                                (forward-line index)         
-                                (let ((end (line-end-position)))
-                                    (if (and (not (eobp)) (char-equal (char-after end) ?\n))
-                                        (delete-region (line-beginning-position) (1+ end))  ;; Include newline
-                                    (delete-region (line-beginning-position) end))) 
-                                (insert result)  ;; Insert the string
-                                (insert " | ")
-                                (insert name)
-                                (insert "\n")
-                                (read-only-mode 1)
-                            )
-                        )
-                    )                
-                ) ;Todo: customize the amount of words to look back
-                )
+                        )                
+                    ) ;Todo: customize the amount of words to look back
+                    )
+                
+                ((string= scope-type remem-voice-type)
+                    (remem-set-scope-timer new-scope
+                    (run-at-time 1 period 
+                        (lambda ()
+                            (remem-query index name (last-several-words current-voice-input voice-input-wordcount))     
+                    ) ;Todo: customize the amount of words to look back
+                    )
+                ))
             )
         )
         (setq remem-scopes (cons new-scope remem-scopes))
@@ -160,8 +155,6 @@
     )
 )
 
-
-
 (defun window-displayed-height (&optional window)
     (- (window-height window) 1))
 
@@ -217,10 +210,12 @@
     )
 )
 
-(defun remem-query (query-string)
+(defun remem-query (index name query-string)
     "Make a query on a particular string
     TODO: Actually make the query
     "
+    (message "Query %d" index)
+    (process-send-string remembrance-agent-query-client (concat (number-to-string index) "|" name "|" query-string))
     (list 1.0 query-string "test result")
 )
 
@@ -248,5 +243,90 @@
     (replace-regexp-in-string "\n" " " retval)
     ))
 
+(defun last-several-words (str count)
+  (let* ((words (split-string str "\\W+"))   ;; Split string into words
+         (last-words (last words count)))       ;; Get the last 5 words
+    (string-join last-words " ")))          ;; Join them back into a string
+
+(setq voice-receiver-server
+      (make-network-process :name "voice-receiver-server"
+                            :buffer "*voice-receiver-server*"
+                            :family 'ipv4
+                            :service 9999       ;; Port to listen on
+                            :server t
+                            :noquery t
+                            :filter 'voice-receiver-filter))
+
+(defun voice-receiver-filter (proc string)
+  "Handle incoming data from PROC with STRING."
+  (setq current-voice-input string))
+
+(defun voice-receiver-stop ()
+  "Stop the server."
+  (when (process-live-p voice-receiver-server)
+    (delete-process voice-receiver-server)))
+
+(setq remembrance-agent-query-client
+      (make-network-process :name "remembrance-agent-query-client"
+                            :buffer "*remembrance-agent-query-client*"
+                            :family 'ipv4
+                            :host "127.0.0.1"
+                            :service 9998       ;; Port to listen on
+                            :filter 'remembrance-agent-query-results-filter
+                            :sentinel 'client-connection-sentinel
+                            ))
+
+(defun remembrance-agent-query-results-filter (proc string)
+  "Handle incoming data from PROC with STRING."
+    (dolist (line (split-string string "\n"))
+        (unless (string-empty-p line)  ; Skip if the line is empty
+        (let* (
+            (parsed-results (parse-result line))
+            (index (car parsed-results))
+            (name (car (cdr parsed-results)))
+            (result (car (cdr (cdr parsed-results))) )
+            )
+        (set-text-properties 0 (length result) nil result)
+
+        (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+            (read-only-mode 0)
+            (goto-char (point-min))
+            (forward-line index)         
+            (let ((end (line-end-position)))
+                (if (and (not (eobp)) (char-equal (char-after end) ?\n))
+                    (delete-region (line-beginning-position) (1+ end))  ;; Include newline
+                (delete-region (line-beginning-position) end))) 
+            (insert (number-to-string index))
+            (insert " | ")
+            (insert result)  ;; Insert the string
+            (insert " | ")
+            (insert name)
+            (insert " \n")
+            (read-only-mode 1)
+        ))
+    ))
+)
+
+(defun parse-result (result)
+    (let 
+        (
+            (results (split-string result "|"))
+        )
+    (list (string-to-number (car results)) (car (cdr results)) (car (cdr (cdr results))))
+    )
+
+)
+
+(defun remembrance-agent-query-client ()
+  "Stop the client."
+  (when (process-live-p remembrance-agent-query-client)
+    (delete-process remembrance-agent-query-client)))
+
+(defun client-connection-sentinel (proc event)
+  "Handle connection events for PROC."
+  (message "Connection event: %s" event))
+
+
 (start-remem)
 (provide 'remembrance)
+
