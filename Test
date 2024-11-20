@@ -1,0 +1,2 @@
+Error running timer: (wrong-number-of-arguments (((client . #<process remembrance-agent-query-client<1>>) (new-scope . ["T" "text 2" 4 [t 26429 34543 862167 4 (closure #2 nil (remem-query client index name (remem-last-several-words (remem-scope-num-last-words new-scope)))) (1) nil 0 nil] nil #<process remembra\
+nce-agent-query-client<1>> 1]) (index . 1) (name . "text 2")) nil (remem-query client index name (remem-last-several-words (remem-scope-num-last-words new-scope)))) 1)

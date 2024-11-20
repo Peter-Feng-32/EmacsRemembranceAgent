@@ -13,6 +13,9 @@
 ;;; Commentary:
 
 ;;; Code:
+
+(require 'json)
+
 (defcustom num-suggestions-voice 1
     "Number of suggestions for the remembrance agent to show based on voice"
     :type '(integer)
@@ -43,65 +46,73 @@
     "Global timer for running remembrance agent checkup function to make sure window is still alive"
 )
 
-(defvar remem-text-type "text")
-(defvar remem-voice-type "voice")
+(defvar remem-text-type "T")
+(defvar remem-voice-type "V")
 
 ;; Remembrance agent scope configs (type,  name, period)
 ;; period - number of seconds in between queries
 
 (defvar remem-scopes-configs-list (list 
-    (list remem-text-type "text 1" 2)
-    (list remem-text-type "text 2" 3)
-    (list remem-voice-type "voice 1" 1) 
+    (list remem-text-type "text 1" 3 5 )
+    (list remem-text-type "text 2" 4 10)
+    (list remem-voice-type "voice 1" 5 nil) 
 ))
 
 (setq current-voice-input "Test Voice")
-(setq voice-input-wordcount 5)
+(setq voice-input-wordcount 15)
 
 (defvar remem-scopes nil)
 ;; (make-variable-buffer-local 'remem-scopes) ; each buffer has its own set of scopes
 
-(defun format-result (result)
-    (format "%d | %s | %s" (car result) (car (cdr result)) (car (cdr (cdr result))))
-)
+(defun remem-start-scope (scope-type name period num-last-words index)
+    "Start a specific scope for remembrance agent"
 
-(defun remem-start-scope (scope-type name period index)
-    (let (
+    (let* (
         (new-scope (vector
-                    scope-type ;Text or voice
-                    name
-                    period
-                    nil ;timer
-                    nil ;query
+            scope-type ;Text or voice
+            name
+            period
+            nil ;timer
+            nil ;query
+            nil ;client
+            num-last-words ;num-last-words
+        ))
+        (results-filter-local (lambda (proc string) (remembrance-agent-query-results-filter proc string index new-scope) ))
+        (client (make-network-process :name "remembrance-agent-query-client"
+                            :buffer "*remembrance-agent-query-client*"
+                            :family 'ipv4
+                            :host "127.0.0.1"
+                            :service 9998       ;; Port to listen on
+                            :filter results-filter-local
+                            :sentinel 'client-connection-sentinel
         ))
         )
-
+        (remem-set-scope-client new-scope client)
         (if (> period 0)
             (cond
                 ((string= scope-type remem-text-type)
                     (remem-set-scope-timer new-scope
                     (run-at-time 1 period 
                         (lambda ()
-                            (remem-query index name (remem-last-several-words 5))
-                            )
-                        )                
+                            (remem-query client index name (remem-last-several-words (remem-scope-num-last-words new-scope)))
+                        )
+                    )                
                     ) ;Todo: customize the amount of words to look back
-                    )
+                )
                 
                 ((string= scope-type remem-voice-type)
+                
                     (remem-set-scope-timer new-scope
                     (run-at-time 1 period 
                         (lambda ()
-                            (remem-query index name (last-several-words current-voice-input voice-input-wordcount))     
+                            (remem-query client index name (last-several-words current-voice-input voice-input-wordcount))     
                     ) ;Todo: customize the amount of words to look back
                     )
                 ))
             )
         )
-        (setq remem-scopes (cons new-scope remem-scopes))
-
+        (setq remem-scopes (cons (list name new-scope) remem-scopes))
     )
-    "Start a specific scope for remembrance agent"
 )
 
 (defun remem-scope-type (scope)
@@ -134,6 +145,18 @@
 (defun remem-set-scope-query (scope value)
     (aset scope 4 value))
 
+(defun remem-scope-client (scope)
+    (aref scope 5)) ; Most recent query searched
+
+(defun remem-set-scope-client (scope value)
+    (aset scope 5 value))
+
+(defun remem-scope-num-last-words (scope)
+    (aref scope 6)) ; Most recent query searched
+
+(defun remem-set-scope-num-last-words (scope value)
+    (aset scope 6 value))
+
 (defun remem-start-scopes (scopes-configs-list index)
     "Start scopes for remembrance agent based on remem-scopes-config-list"
     (let (
@@ -146,12 +169,12 @@
                 (car current-scope-config)
                 (car (cdr current-scope-config))
                 (car (cdr (cdr current-scope-config)))
+                (car (cdr (cdr (cdr current-scope-config))))
                 index
             )
             (remem-start-scopes (cdr scopes-configs-list) (+ index 1))
         )
         )
-
     )
 )
 
@@ -169,19 +192,25 @@
             )
 
             (with-current-buffer new-buffer
+                (let 
+                    ((numlines 0))
+                    (while (< numlines (- remem-display-buffer-height 1))
+                        (insert "\n")
+                        (setq numlines (1+ numlines))
+                    )
+                )
                 (read-only-mode 1)
             )
 
             (setq w (split-window w))
             (set-window-buffer w new-buffer)
             (select-window w)
-            (enlarge-window (- remem-display-buffer-height (window-displayed-height) 1))
+            (enlarge-window (- remem-display-buffer-height (window-displayed-height)))
             (set-window-dedicated-p w t))
         )
         (select-window orig-window)
     )
 )
-
 
 (defun remem-fix-window-loss ()
   "Makes sure that Remem dies when the buffer is gone, and respawns when window is no longer visible.  This is because of that stupid resize-windows bug"
@@ -210,24 +239,22 @@
     )
 )
 
-(defun remem-query (index name query-string)
-    "Make a query on a particular string
-    TODO: Actually make the query
-    "
-    (message "Query %d" index)
-    (process-send-string remembrance-agent-query-client (concat (number-to-string index) "|" name "|" query-string))
-    (list 1.0 query-string "test result")
+(defun remem-query (client index name query-string)
+    "Make a query on a particular string"
+    (process-send-string client (concat query-string "\n"))
 )
 
-
 (defun remem-last-several-words (count)
-  "String from count words back to current point.  (word = 5 chars)"
+  "String from count words back to current point. "
   (let ((orig-window (get-buffer-window (current-buffer)))
         (end) (beg) (retval) (realbufname))
     (save-excursion
         ; place start of sample count words before current position
         ; or as far back as possible
-      (setq beg (- (point) (* 5 count)))
+        (if (null count)
+            (setq beg point-min)
+            (setq beg (- (point) (* 5 count)))
+        )
       (if (< beg (point-min)) 
           (setq beg (point-min)))
       ; and place end of sample count words ahead of beginning
@@ -259,65 +286,92 @@
 
 (defun voice-receiver-filter (proc string)
   "Handle incoming data from PROC with STRING."
-  (setq current-voice-input string))
+    (setq current-voice-input string)
+
+      (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+        (read-only-mode 0)
+        (goto-line 1)         
+        (delete-region (line-beginning-position) (line-end-position))
+        (insert string)
+        (read-only-mode 1)
+    )
+
+)
 
 (defun voice-receiver-stop ()
   "Stop the server."
   (when (process-live-p voice-receiver-server)
     (delete-process voice-receiver-server)))
 
-(setq remembrance-agent-query-client
-      (make-network-process :name "remembrance-agent-query-client"
-                            :buffer "*remembrance-agent-query-client*"
-                            :family 'ipv4
-                            :host "127.0.0.1"
-                            :service 9998       ;; Port to listen on
-                            :filter 'remembrance-agent-query-results-filter
-                            :sentinel 'client-connection-sentinel
-                            ))
+(defun remembrance-agent-query-results-filter (proc string scope-index scope)
+  "Handle incoming data from PROC with STRING.
+  Write incoming string into process buffer until we get '}', then handle as a JSON object and write remaining string into buffer, repeat.
+  "
 
-(defun remembrance-agent-query-results-filter (proc string)
-  "Handle incoming data from PROC with STRING."
-    (dolist (line (split-string string "\n"))
-        (unless (string-empty-p line)  ; Skip if the line is empty
-        (let* (
-            (parsed-results (parse-result line))
-            (index (car parsed-results))
-            (name (car (cdr parsed-results)))
-            (result (car (cdr (cdr parsed-results))) )
-            )
-        (set-text-properties 0 (length result) nil result)
-
-        (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+  (let ((buffer (process-buffer proc)))
+    (when (and proc (process-live-p proc) buffer)
+      (with-current-buffer buffer
+        (progn 
             (read-only-mode 0)
-            (goto-char (point-min))
-            (forward-line index)         
-            (let ((end (line-end-position)))
-                (if (and (not (eobp)) (char-equal (char-after end) ?\n))
-                    (delete-region (line-beginning-position) (1+ end))  ;; Include newline
-                (delete-region (line-beginning-position) end))) 
-            (insert (number-to-string index))
-            (insert " | ")
-            (insert result)  ;; Insert the string
-            (insert " | ")
-            (insert name)
-            (insert " \n")
+            (insert string)
+            (goto-char (point-min)) 
+            (let* (
+                    (json-object-type 'hash-table)
+                    (current-json 
+                        (condition-case nil
+                            (json-read)
+                        (error nil))
+                    )
+                )
+                (while current-json
+                (progn
+                    (handle-ra-result current-json scope-index scope)
+                    (setq current-json                         
+                        (condition-case nil
+                            (json-read)
+                        (error nil))
+                    )
+                    (delete-region (point-min) (point))
+                )
+                )
+            )
             (read-only-mode 1)
-        ))
-    ))
-)
-
-(defun parse-result (result)
-    (let 
-        (
-            (results (split-string result "|"))
         )
-    (list (string-to-number (car results)) (car (cdr results)) (car (cdr (cdr results))))
-    )
+        )     
+    ))
+) 
 
+
+(defun handle-ra-result (parsed-result scope-index scope)
+    ;;TODO with json.
+    (let (
+        (score (gethash "similarity_score" parsed-result))
+        (doctitle (gethash "document_title" parsed-result))
+        (scope-type (remem-scope-type scope))
+        (scope-period (remem-scope-period scope))
+        (scope-num-last-words (remem-scope-num-last-words scope))
+    )
+    
+    (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+        (read-only-mode 0)
+        (goto-line (+ 2 scope-index))         
+        (delete-region (line-beginning-position) (line-end-position))
+        (insert scope-type)
+        (insert " | P: ")
+        (insert (number-to-string scope-period))
+        (insert " | W: ")
+        (insert (number-to-string (or scope-num-last-words -1)))
+        (insert " | S: ")
+        (insert (number-to-string score))
+        (insert " | \"")
+        (insert doctitle)
+        (insert "\"")
+        (read-only-mode 1)
+    )
+    )
 )
 
-(defun remembrance-agent-query-client ()
+(defun remembrance-agent-query-client-stop (remembrance-agent-query-client)
   "Stop the client."
   (when (process-live-p remembrance-agent-query-client)
     (delete-process remembrance-agent-query-client)))
@@ -325,7 +379,6 @@
 (defun client-connection-sentinel (proc event)
   "Handle connection events for PROC."
   (message "Connection event: %s" event))
-
 
 (start-remem)
 (provide 'remembrance)
