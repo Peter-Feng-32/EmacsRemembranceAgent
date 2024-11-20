@@ -110,7 +110,7 @@
                     (remem-set-scope-timer new-scope
                     (run-at-time 1 period 
                         (lambda ()
-                            (setq query (normalize-spaces-in-string (substring-no-properties (last-several-words current-voice-input (remem-scope-num-last-words new-scope)))))
+                            (setq query (normalize-spaces-in-string (substring-no-properties current-voice-input)))
                             (remem-set-scope-query new-scope query)
                             (remem-query client index name query)     
                     ) ;Todo: customize the amount of words to look back
@@ -395,9 +395,9 @@
         (insert " | \"")
         (insert doctitle)
         (insert "\"")
-        (insert " | Q: \"")
-        (insert scope-query)
-        (insert "\"")
+        ;;(insert " | Q: \"")
+        ;;(insert (last-several-words scope-query 3))
+        ;;(insert "\"")
         (read-only-mode 1)
     )
     )
