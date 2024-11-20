@@ -58,11 +58,14 @@
     (list remem-voice-type "voice 1" 5 nil) 
 ))
 
-(setq current-voice-input "Test Voice")
-(setq voice-input-wordcount 15)
+(setq current-voice-input "")
 
 (defvar remem-scopes nil)
 ;; (make-variable-buffer-local 'remem-scopes) ; each buffer has its own set of scopes
+
+(defun normalize-spaces-in-string (input-string)
+  "Replace all whitespace in INPUT-STRING with single spaces."
+  (replace-regexp-in-string "[ \t\n\r]+" " " input-string))
 
 (defun remem-start-scope (scope-type name period num-last-words index)
     "Start a specific scope for remembrance agent"
@@ -94,7 +97,9 @@
                     (remem-set-scope-timer new-scope
                     (run-at-time 1 period 
                         (lambda ()
-                            (remem-query client index name (remem-last-several-words (remem-scope-num-last-words new-scope)))
+                            (setq query (normalize-spaces-in-string (substring-no-properties (remem-last-several-words (remem-scope-num-last-words new-scope)))))
+                            (remem-set-scope-query new-scope query)
+                            (remem-query client index name query)
                         )
                     )                
                     ) ;Todo: customize the amount of words to look back
@@ -105,7 +110,9 @@
                     (remem-set-scope-timer new-scope
                     (run-at-time 1 period 
                         (lambda ()
-                            (remem-query client index name (last-several-words current-voice-input voice-input-wordcount))     
+                            (setq query (normalize-spaces-in-string (substring-no-properties (last-several-words current-voice-input (remem-scope-num-last-words new-scope)))))
+                            (remem-set-scope-query new-scope query)
+                            (remem-query client index name query)     
                     ) ;Todo: customize the amount of words to look back
                     )
                 ))
@@ -182,6 +189,7 @@
     (- (window-height window) 1))
 
 (defun remem-display-buffer (buffer-name)
+    
   (let ((orig-buffer (current-buffer))
         (orig-window (get-buffer-window (current-buffer))))
 
@@ -192,6 +200,8 @@
             )
 
             (with-current-buffer new-buffer
+                (read-only-mode 0)
+                (erase-buffer)
                 (let 
                     ((numlines 0))
                     (while (< numlines (- remem-display-buffer-height 1))
@@ -244,6 +254,18 @@
     (process-send-string client (concat query-string "\n"))
 )
 
+(defun get-point-words-back (count)
+  "Return the position of the point 5 words back without moving the cursor."
+  (save-excursion
+    (backward-word count) 
+    (point))) 
+
+(defun get-point-words-forward (count)
+  "Return the position of the point 5 words back without moving the cursor."
+  (save-excursion
+    (forward-word count) 
+    (point))) 
+
 (defun remem-last-several-words (count)
   "String from count words back to current point. "
   (let ((orig-window (get-buffer-window (current-buffer)))
@@ -253,15 +275,15 @@
         ; or as far back as possible
         (if (null count)
             (setq beg point-min)
-            (setq beg (- (point) (* 5 count)))
+            (setq beg (get-point-words-back count))
         )
       (if (< beg (point-min)) 
           (setq beg (point-min)))
       ; and place end of sample count words ahead of beginning
-      (setq end (+ beg (* 5 count)))
+      (setq end (get-point-words-forward count))
       (if (> end (point-max)) 
 	  (setq end (point-max)))
-      (setq retval (concat " " (buffer-substring beg end)))
+      (setq retval (concat "" (buffer-substring beg end)))
 ;      (while (string-match "\n\\.\n" retval)
 ;        (setq retval (replace-match "\n .\n" t t retval)))
       )
@@ -289,10 +311,16 @@
     (setq current-voice-input string)
 
       (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+
+        (if (> (window-total-width) (string-width string))
+            (setq earliest-point 0)
+            (setq earliest-point (- 0 (window-total-width)))
+        )
+        (setq display-string (substring (normalize-spaces-in-string current-voice-input) earliest-point -1))
         (read-only-mode 0)
         (goto-line 1)         
         (delete-region (line-beginning-position) (line-end-position))
-        (insert string)
+        (insert display-string)
         (read-only-mode 1)
     )
 
@@ -349,6 +377,7 @@
         (doctitle (gethash "document_title" parsed-result))
         (scope-type (remem-scope-type scope))
         (scope-period (remem-scope-period scope))
+        (scope-query (remem-scope-query scope))
         (scope-num-last-words (remem-scope-num-last-words scope))
     )
     
@@ -365,6 +394,9 @@
         (insert (number-to-string score))
         (insert " | \"")
         (insert doctitle)
+        (insert "\"")
+        (insert " | Q: \"")
+        (insert scope-query)
         (insert "\"")
         (read-only-mode 1)
     )

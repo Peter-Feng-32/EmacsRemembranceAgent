@@ -11,7 +11,7 @@ def send_message_to_server():
     print("Connected to the server.")
 
     # Send a message
-    message = "Hello from the client!"
+    message = "Hello from the client!\n\n"
     client_socket.sendall(message.encode('utf-8'))
 
     # Close the connection
