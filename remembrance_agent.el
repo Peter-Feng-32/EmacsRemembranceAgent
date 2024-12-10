@@ -185,6 +185,28 @@
     )
 )
 
+(defun remem-stop-scopes (scopes-list index)
+    "Stop scopes for remembrance agent based on scopes-list"
+    (let (
+        (current-scope (car (cdr (car scopes-list))))
+        )
+        (cond 
+        ((null current-scope) nil)
+        (t
+            
+            (progn 
+                (message (aref current-scope 0))
+                (setq timer (aref current-scope 3))
+                (setq client (aref current-scope 5))
+                (cancel-timer timer)
+                (delete-process client)
+                (remem-stop-scopes (cdr scopes-list) (+ index 1))
+            )
+        )
+        )
+    )
+)
+
 (defun window-displayed-height (&optional window)
     (- (window-height window) 1))
 
@@ -234,6 +256,7 @@
 )
 
 (defun start-remem ()
+    (interactive
     (save-excursion
         (cond (remem-display-running
             (message "Remembrance Agent already running")
@@ -246,6 +269,30 @@
             )
         )
         (remem-start-scopes remem-scopes-configs-list 0)
+    )
+    )
+)
+
+(defun stop-remem()
+    (interactive
+    (save-excursion
+        (if remem-display-running
+            (progn
+                (cancel-timer remem-global-timer)
+                (setq remem-window (get-buffer-window remem-buffer-name) )
+                (if (not (null remem-window))
+                    (progn
+                        (select-window remem-window)
+                        (kill-buffer-and-window)
+                    )
+                    ()
+                )
+                (setq remem-display-running nil)
+            )
+        )
+        
+        (remem-stop-scopes remem-scopes 0)
+    )
     )
 )
 
@@ -412,6 +459,5 @@
   "Handle connection events for PROC."
   (message "Connection event: %s" event))
 
-(start-remem)
 (provide 'remembrance)
 
