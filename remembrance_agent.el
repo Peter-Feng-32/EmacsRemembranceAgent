@@ -65,6 +65,21 @@
 (setq remem-scopes nil)
 ;; (make-variable-buffer-local 'remem-scopes) ; each buffer has its own set of scopes
 
+(defun setup-keybinds ()
+    (progn
+        (global-set-key (kbd "C-c r") (lambda () (interactive) 
+            (if (null remem-display-running)
+                (start-remem)
+                (stop-remem)
+            )
+        ))
+
+        (global-set-key (kbd "C-c 1") (lambda () (interactive) (remembrance-agent-open-file 0)))
+        (global-set-key (kbd "C-c 2") (lambda () (interactive) (remembrance-agent-open-file 1)))
+        (global-set-key (kbd "C-c 3") (lambda () (interactive) (remembrance-agent-open-file 2)))
+    )
+)
+
 (defun normalize-spaces-in-string (input-string)
   "Replace all whitespace in INPUT-STRING with single spaces."
   (replace-regexp-in-string "[ \t\n\r]+" " " input-string))
@@ -121,7 +136,7 @@
             )
         )
         (setq remem-scopes (cons (list name new-scope) remem-scopes))
-        (setq ra-file-results (cons nil remem-scopes))
+        (setq ra-file-results (cons nil ra-file-results))
     )
 )
 
@@ -198,7 +213,6 @@
         (t
             
             (progn 
-                (message (aref current-scope 0))
                 (setq timer (aref current-scope 3))
                 (setq client (aref current-scope 5))
                 (cancel-timer timer)
@@ -259,8 +273,9 @@
 )
 
 (defun start-remem ()
-    (interactive
+    (interactive)
     (save-excursion
+        
         (cond (remem-display-running
             (message "Remembrance Agent already running")
             )
@@ -273,11 +288,11 @@
         )
         (remem-start-scopes remem-scopes-configs-list 0)
     )
-    )
+    
 )
 
 (defun stop-remem()
-    (interactive
+    (interactive)
     (save-excursion
         (if remem-display-running
             (progn
@@ -291,12 +306,11 @@
                     ()
                 )
                 (setq remem-display-running nil)
+                (remem-stop-scopes remem-scopes 0)
             )
         )
-        
-        (remem-stop-scopes remem-scopes 0)
     )
-    )
+    
 )
 
 (defun remem-query (client index name query-string)
@@ -360,19 +374,26 @@
   "Handle incoming data from PROC with STRING."
     (setq current-voice-input string)
 
-      (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+        (if remem-display-running
+            (if (not (null (get-buffer remem-buffer-name)))
+                (with-current-buffer remem-buffer-name   ;; Switch to the buffer
 
-        (if (> (window-total-width) (string-width string))
-            (setq earliest-point 0)
-            (setq earliest-point (- 0 (window-total-width)))
+                    (if (> (window-total-width) (string-width string))
+                        (setq earliest-point 0)
+                        (setq earliest-point (- 0 (window-total-width)))
+                    )
+                    (setq display-string (substring (normalize-spaces-in-string current-voice-input) earliest-point -1))
+                    (read-only-mode 0)
+                    (goto-line 1)         
+                    (delete-region (line-beginning-position) (line-end-position))
+                    (insert display-string)
+                    (read-only-mode 1)
+                )
+
+            )
         )
-        (setq display-string (substring (normalize-spaces-in-string current-voice-input) earliest-point -1))
-        (read-only-mode 0)
-        (goto-line 1)         
-        (delete-region (line-beginning-position) (line-end-position))
-        (insert display-string)
-        (read-only-mode 1)
-    )
+
+
 
 )
 
@@ -425,35 +446,46 @@
     (let (
         (score (gethash "similarity_score" parsed-result))
         (doctitle (gethash "document_title" parsed-result))
-        (filepath (gethash "file_path" parsed-result))
+        (filepath 
+            (if (string= (gethash "file_path" parsed-result) "null")
+                nil
+                (gethash "file_path" parsed-result)
+            )
+        )
         (scope-type (remem-scope-type scope))
         (scope-period (remem-scope-period scope))
         (scope-query (remem-scope-query scope))
         (scope-num-last-words (remem-scope-num-last-words scope))
     )
-    (progn 
-        (with-current-buffer remem-buffer-name   ;; Switch to the buffer
-            (read-only-mode 0)
-            (goto-line (+ 2 scope-index))         
-            (delete-region (line-beginning-position) (line-end-position))
-            (insert scope-type)
-            (insert " | P: ")
-            (insert (number-to-string scope-period))
-            (insert " | W: ")
-            (insert (number-to-string (or scope-num-last-words -1)))
-            (insert " | S: ")
-            (insert (number-to-string score))
-            (insert " | \"")
-            (insert doctitle)
-            (insert "\"")
-            ;;(insert " | Q: \"")
-            ;;(insert (last-several-words scope-query 3))
-            ;;(insert "\"")
-            (read-only-mode 1)
+        (progn 
+            (if remem-display-running
+                (if (not (null (get-buffer remem-buffer-name)))
+                    (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+                        (read-only-mode 0)
+                        (goto-line (+ 2 scope-index))         
+                        (delete-region (line-beginning-position) (line-end-position))
+                        (insert scope-type)
+                        (insert " | P: ")
+                        (insert (number-to-string scope-period))
+                        (insert " | W: ")
+                        (insert (number-to-string (or scope-num-last-words -1)))
+                        (insert " | S: ")
+                        (insert (number-to-string score))
+                        (insert " | \"")
+                        (insert doctitle)
+                        (insert "\"")
+                        ;;(insert " | Q: \"")
+                        ;;(insert (last-several-words scope-query 3))
+                        ;;(insert "\"")
+                        (read-only-mode 1)
+                    )
+                )
+                )
+            (setcar (nthcdr scope-index ra-file-results) filepath)
+
         )
-        (setcar (nthcdr scope-index ra-file-results) filepath)
     )
-    )
+    
 )
 
 (defun remembrance-agent-query-client-stop (remembrance-agent-query-client)
@@ -472,16 +504,14 @@
         )
     )
     (progn
-        (message "Test")
         (let
             ((file (nth index ra-file-results)))
-            (message file)
             (if (not (null file))
                 (find-file file)
             )
         )
     )
 )
-
+(setup-keybinds)
 (provide 'remembrance)
 
