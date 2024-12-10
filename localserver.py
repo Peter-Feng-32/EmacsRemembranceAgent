@@ -28,8 +28,10 @@ def handle_client(client_socket, client_address, num_connections):
             data = client_socket.recv(1024)
             if not data:
                 break
+            file_path = "/Users/Peter/Desktop/EmacsRA/documents/athena.txt"
             print(data)
-            response = "{\"similarity_score\": " + str(num_connections) + ", \"document_title\": \"Test Title\"}"
+            response = "{\"similarity_score\": " + str(num_connections) + ", \"document_title\": \"Test Title\"" + ", \"file_path\": \"" + file_path + "\"" + "}"
+            print(response)
             client_socket.sendall(response.encode('utf-8'))  # Echo back the data
     finally:
         print(f"Connection closed for {client_address}")

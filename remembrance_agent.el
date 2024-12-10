@@ -49,18 +49,20 @@
 (defvar remem-text-type "T")
 (defvar remem-voice-type "V")
 
-;; Remembrance agent scope configs (type,  name, period)
+;; Remembrance agent scope configs (type, name, period, num last words)
 ;; period - number of seconds in between queries
 
 (defvar remem-scopes-configs-list (list 
-    (list remem-text-type "text 1" 3 5 )
+    (list remem-text-type "text 1" 3 5)
     (list remem-text-type "text 2" 4 10)
     (list remem-voice-type "voice 1" 5 nil) 
 ))
 
 (setq current-voice-input "")
 
-(defvar remem-scopes nil)
+(setq ra-file-results nil)
+
+(setq remem-scopes nil)
 ;; (make-variable-buffer-local 'remem-scopes) ; each buffer has its own set of scopes
 
 (defun normalize-spaces-in-string (input-string)
@@ -119,6 +121,7 @@
             )
         )
         (setq remem-scopes (cons (list name new-scope) remem-scopes))
+        (setq ra-file-results (cons nil remem-scopes))
     )
 )
 
@@ -422,30 +425,33 @@
     (let (
         (score (gethash "similarity_score" parsed-result))
         (doctitle (gethash "document_title" parsed-result))
+        (filepath (gethash "file_path" parsed-result))
         (scope-type (remem-scope-type scope))
         (scope-period (remem-scope-period scope))
         (scope-query (remem-scope-query scope))
         (scope-num-last-words (remem-scope-num-last-words scope))
     )
-    
-    (with-current-buffer remem-buffer-name   ;; Switch to the buffer
-        (read-only-mode 0)
-        (goto-line (+ 2 scope-index))         
-        (delete-region (line-beginning-position) (line-end-position))
-        (insert scope-type)
-        (insert " | P: ")
-        (insert (number-to-string scope-period))
-        (insert " | W: ")
-        (insert (number-to-string (or scope-num-last-words -1)))
-        (insert " | S: ")
-        (insert (number-to-string score))
-        (insert " | \"")
-        (insert doctitle)
-        (insert "\"")
-        ;;(insert " | Q: \"")
-        ;;(insert (last-several-words scope-query 3))
-        ;;(insert "\"")
-        (read-only-mode 1)
+    (progn 
+        (with-current-buffer remem-buffer-name   ;; Switch to the buffer
+            (read-only-mode 0)
+            (goto-line (+ 2 scope-index))         
+            (delete-region (line-beginning-position) (line-end-position))
+            (insert scope-type)
+            (insert " | P: ")
+            (insert (number-to-string scope-period))
+            (insert " | W: ")
+            (insert (number-to-string (or scope-num-last-words -1)))
+            (insert " | S: ")
+            (insert (number-to-string score))
+            (insert " | \"")
+            (insert doctitle)
+            (insert "\"")
+            ;;(insert " | Q: \"")
+            ;;(insert (last-several-words scope-query 3))
+            ;;(insert "\"")
+            (read-only-mode 1)
+        )
+        (setcar (nthcdr scope-index ra-file-results) filepath)
     )
     )
 )
@@ -458,6 +464,24 @@
 (defun client-connection-sentinel (proc event)
   "Handle connection events for PROC."
   (message "Connection event: %s" event))
+
+(defun remembrance-agent-open-file (index)
+    (interactive 
+        (list
+            (read-number "index: ")
+        )
+    )
+    (progn
+        (message "Test")
+        (let
+            ((file (nth index ra-file-results)))
+            (message file)
+            (if (not (null file))
+                (find-file file)
+            )
+        )
+    )
+)
 
 (provide 'remembrance)
 
